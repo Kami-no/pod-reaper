@@ -26,7 +26,8 @@ func main() {
 
 	log.Level = log.LevelDebug
 
-	log.Infof("Hello from pod reaper! Hide all the pods!\n")
+	log.Infof("Pod reaper smiles at all pods; all a pod can do is smile back.")
+	log.Infof("You can run but you can't hide!\n")
 
 	var config *rest.Config
 	var err error
@@ -90,7 +91,7 @@ func main() {
 						log.Debugf("pod %s : provided value %s is incorrect\n", v.Name, val)
 					} else if killedPods < maxReaperCount {
 						log.Debugf("pod %s : %s\n", v.Name, v.CreationTimestamp)
-						currentLifetime := time.Now().Sub(v.CreationTimestamp.Time)
+						currentLifetime := time.Since(v.CreationTimestamp.Time)
 						if currentLifetime > lifetime {
 							var err error
 							if evict {
