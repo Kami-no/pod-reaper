@@ -23,16 +23,6 @@ spec:
         env:
           - name: REMOTE_EXEC
             value:  "true"
-          - name: APP
-            value: {{ .Chart.Name }}
-          - name: SUMO_ACCESS_ID
-            value: {{ .Values.sumoAccessId }}
-          - name: SUMO_ACCESS_KEY
-            value: {{ .Values.sumoAccessKey }}
-          - name: SUMO_RECEIVER_URL
-            value: {{ .Values.sumoReceiverURL }}
-          - name: COMMIT_AUTHOR
-            value: {{ .Values.author }}
           - name: REAPER_NAMESPACES
             value: {{ .Release.Namespace }}
           - name: MAX_REAP_COUNT_PER_RUN
@@ -41,6 +31,7 @@ spec:
             value: {{ .Values.reapEvictedPods | default false | quote}}
           - name: CRON_JOB
             value: {{ .Values.cronJob | default false | quote}}
+        imagePullPolicy: Always
         resources:
           limits:
             cpu: 1000m
