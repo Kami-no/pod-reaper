@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +12,8 @@ import (
 	"time"
 
 	"github.com/cloudflare/cfssl/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	policyv1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -20,6 +24,29 @@ import (
 
 const (
 	lifetimeAnnotation string = "pod.kubernetes.io/lifetime"
+)
+
+var (
+	metricPodsReaped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "pod_reaper_reaped",
+			Help: "Number of reaped pods.",
+		},
+		[]string{
+			"namespace",
+			"method",
+		},
+	)
+	metricPods = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "pod_reaper_watching",
+			Help: "Number of pods watching.",
+		},
+		[]string{
+			"namespace",
+			"kind",
+		},
+	)
 )
 
 func main() {
@@ -70,6 +97,18 @@ func main() {
 		panic(err.Error())
 	}
 
+	// metrics server
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "ok\n")
+	})
+	http.Handle("/metrics", promhttp.Handler())
+	go func() {
+		err = http.ListenAndServe(":8080", nil)
+		if err != nil {
+			panic("failed to start server at port 8080")
+		}
+	}()
+
 	for {
 		reaperNamespaces := namespaces()
 		if len(reaperNamespaces) == 0 {
@@ -82,14 +121,17 @@ func main() {
 			}
 
 			log.Infof("Checking %d pods in namespace %s\n", len(pods.Items), ns)
-			killedPods := 0
+			metricPods.WithLabelValues(ns, "found").Set(float64(len(pods.Items)))
+			podsWatching := 0
+			podsKilled := 0
+
 			for _, v := range pods.Items {
 				if val, ok := v.Annotations[lifetimeAnnotation]; ok {
 					log.Debugf("pod %s : Found annotation %s with value %s\n", v.Name, lifetimeAnnotation, val)
 					lifetime, _ := time.ParseDuration(val)
 					if lifetime == 0 {
 						log.Debugf("pod %s : provided value %s is incorrect\n", v.Name, val)
-					} else if killedPods < maxReaperCount {
+					} else if podsKilled < maxReaperCount {
 						log.Debugf("pod %s : %s\n", v.Name, v.CreationTimestamp)
 						currentLifetime := time.Since(v.CreationTimestamp.Time)
 						if currentLifetime > lifetime {
@@ -108,7 +150,7 @@ func main() {
 								log.Infof("unable to reap pod %s : %s", v.Name, err.Error())
 							} else {
 								log.Infof("pod %s : pod reaped.\n", v.Name)
-								killedPods++
+								podsKilled++
 							}
 						}
 					} else {
@@ -123,12 +165,13 @@ func main() {
 						panic(err.Error())
 					}
 					log.Infof("pod %s : pod killed.\n", v.Name)
-					killedPods++
+					podsKilled++
 				}
-
 			}
 
-			log.Infof("Killed %d Old/Evicted Pods.", killedPods)
+			log.Infof("Killed %d Old/Evicted Pods.", podsKilled)
+			metricPods.WithLabelValues(ns, "watching").Set(float64(podsWatching))
+			metricPodsReaped.WithLabelValues(ns, "killed").Add(float64(podsKilled))
 		}
 		if !runAsCronJob {
 			log.Infof("Now sleeping for %d seconds", int(sleepDuration().Seconds()))
@@ -137,7 +180,6 @@ func main() {
 			break
 		}
 	}
-
 }
 
 func remoteExec() bool {
