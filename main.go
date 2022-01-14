@@ -97,6 +97,10 @@ func main() {
 		panic(err.Error())
 	}
 
+	// register metrics
+	prometheus.MustRegister(metricPods)
+	prometheus.MustRegister(metricPodsReaped)
+
 	// metrics server
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok\n")
