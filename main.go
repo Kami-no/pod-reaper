@@ -39,7 +39,7 @@ var (
 	)
 	metricPods = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "pod_reaper_watching",
+			Name: "pod_reaper_detected",
 			Help: "Number of pods watching.",
 		},
 		[]string{
@@ -125,7 +125,6 @@ func main() {
 			}
 
 			log.Infof("Checking %d pods in namespace %s\n", len(pods.Items), ns)
-			metricPods.WithLabelValues(ns, "found").Set(float64(len(pods.Items)))
 			podsTracking := 0
 			podsKilled := 0
 
@@ -175,6 +174,7 @@ func main() {
 			}
 
 			log.Infof("Killed %d Old/Evicted Pods.", podsKilled)
+			metricPods.WithLabelValues(ns, "ignoring").Set(float64(len(pods.Items) - podsTracking))
 			metricPods.WithLabelValues(ns, "tracking").Set(float64(podsTracking))
 			metricPodsReaped.WithLabelValues(ns, "killed").Add(float64(podsKilled))
 		}
