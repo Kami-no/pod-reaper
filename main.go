@@ -126,12 +126,13 @@ func main() {
 
 			log.Infof("Checking %d pods in namespace %s\n", len(pods.Items), ns)
 			metricPods.WithLabelValues(ns, "found").Set(float64(len(pods.Items)))
-			podsWatching := 0
+			podsTracking := 0
 			podsKilled := 0
 
 			for _, v := range pods.Items {
 				if val, ok := v.Annotations[lifetimeAnnotation]; ok {
 					log.Debugf("pod %s : Found annotation %s with value %s\n", v.Name, lifetimeAnnotation, val)
+					podsTracking++
 					lifetime, _ := time.ParseDuration(val)
 					if lifetime == 0 {
 						log.Debugf("pod %s : provided value %s is incorrect\n", v.Name, val)
@@ -174,7 +175,7 @@ func main() {
 			}
 
 			log.Infof("Killed %d Old/Evicted Pods.", podsKilled)
-			metricPods.WithLabelValues(ns, "watching").Set(float64(podsWatching))
+			metricPods.WithLabelValues(ns, "tracking").Set(float64(podsTracking))
 			metricPodsReaped.WithLabelValues(ns, "killed").Add(float64(podsKilled))
 		}
 		if !runAsCronJob {
