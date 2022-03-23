@@ -1,6 +1,6 @@
 module github.com/ptagr/pod-reaper
 
-go 1.17
+go 1.18
 
 require (
 	github.com/cloudflare/cfssl v1.6.1
