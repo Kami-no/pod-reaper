@@ -1,6 +1,5 @@
 ---
-owner: punagrawal
-replicas: 1
-tier: infra
-team: shared
-maxReapCountPerRun: 30
+cronJob: "false"
+evict: "false"
+maxReapCountPerRun: "30"
+reapEvictedPods: "false"

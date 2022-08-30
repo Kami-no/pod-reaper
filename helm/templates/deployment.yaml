@@ -2,40 +2,38 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Chart.Name }}
+  name: "{{ .Chart.Name }}"
 spec:
-  replicas: {{ .Values.replicas }}
+  replicas: "1"
   selector:
     matchLabels:
-      app: {{ .Chart.Name }}
-      tier: {{ .Values.tier }}
-      team: {{ .Values.team }}
+      app: "{{ .Chart.Name }}"
   template:
     metadata:
       labels:
-        app: {{ .Chart.Name }}
-        tier: {{ .Values.tier }}
-        team: {{ .Values.team }}
+        app: "{{ .Chart.Name }}"
     spec:
       containers:
-      - name: {{ .Chart.Name }}
-        image: {{ .Values.docker_image }}
-        env:
-          - name: REMOTE_EXEC
-            value:  "true"
-          - name: REAPER_NAMESPACES
-            value: {{ .Release.Namespace }}
-          - name: MAX_REAP_COUNT_PER_RUN
-            value: {{ .Values.maxReapCountPerRun | default 30 | quote}}
-          - name: REAP_EVICTED_PODS
-            value: {{ .Values.reapEvictedPods | default false | quote}}
-          - name: CRON_JOB
-            value: {{ .Values.cronJob | default false | quote}}
-        imagePullPolicy: Always
-        resources:
-          limits:
-            cpu: 1000m
-            memory: 1Gi
-          requests:
-            cpu: 50m
-            memory: 128Mi
+        - name: "{{ .Chart.Name }}"
+          image: "ghcr.io/kami-no/pod-reaper:latest"
+          env:
+            - name: CRON_JOB
+              value: "{{ .Values.cronJob }}"
+            - name: EVICT
+              value: "{{ .Values.evict }}"
+            - name: MAX_REAP_COUNT_PER_RUN
+              value: "{{ .Values.maxReapCountPerRun }}"
+            - name: REAP_EVICTED_PODS
+              value: "{{ .Values.reapEvictedPods }}"
+            - name: REAPER_NAMESPACES
+              value: "{{ .Release.Namespace }}"
+            - name: REMOTE_EXEC
+              value: "true"
+          imagePullPolicy: Always
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 50m
+              memory: 128Mi

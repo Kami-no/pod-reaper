@@ -27,12 +27,12 @@ The following environment variables can be set:
 
 | Env Variable           | Description                                                                                  | Sample Values         | Default value | Required |
 |------------------------|----------------------------------------------------------------------------------------------|-----------------------|---------------|----------|
-| REMOTE_EXEC            | Should be set to true when running within the cluster, to false when running locally         | true                  | N/A           | yes      |
-| REAPER_NAMESPACES      | List of namespaces that the reaper would inspect                                             | namespace1,namespace2 | N/A           | yes      |
 | CRON_JOB               | Whether this should be run just once or in a loop. Set to true if running this as a cron job | true                  | false         | no       |
+| EVICT                  | Use Eviction instead of Deletion when removing pods (honors Pod Disruption Budgets)          | true                  | false         | no       |
 | MAX_REAP_COUNT_PER_RUN | Maximum Pods to reap in each run                                                             | 100                   | 30            | no       |
 | REAP_EVICTED_PODS      | Whether or not to delete evicted pods                                                        | true                  | false         | no       |
-| EVICT                  | Use Eviction instead of Deletion when removing pods (honors Pod Disruption Budgets)          | true                  | false         | no       |
+| REAPER_NAMESPACES      | List of namespaces that the reaper would inspect                                             | namespace1,namespace2 | N/A           | yes      |
+| REMOTE_EXEC            | Should be set to true when running within the cluster, to false when running locally         | true                  | N/A           | yes      |
 
 ## Todo
 
