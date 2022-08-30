@@ -1,5 +1,5 @@
 # build stage
-FROM golang:1.18-alpine AS build
+FROM golang:1.19-alpine3.15 AS build
 
 WORKDIR /opt/build
 # hadolint ignore=DL3018
@@ -12,7 +12,6 @@ COPY . .
 RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -a -tags "netgo" -ldflags '-s -w' -o pod-reaper
 
 # artefact stage
-# hadolint ignore=DL3007
-FROM alpine:latest
+FROM alpine:3.15
 COPY --from=build /opt/build/pod-reaper /usr/local/bin/pod-reaper
 CMD ["pod-reaper"]
