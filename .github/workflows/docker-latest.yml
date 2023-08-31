@@ -56,5 +56,5 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/kami-no/envoy-acme:latest
+          tags: ghcr.io/kami-no/pod-reaper:latest
           labels: ${{ steps.meta.outputs.labels }}
