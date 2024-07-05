@@ -14,12 +14,15 @@ import (
 	"github.com/cloudflare/cfssl/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	v1 "k8s.io/api/core/v1"
+
 	policyv1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	cloudnodeutil "k8s.io/cloud-provider/node/helpers"
 )
 
 const (
@@ -50,7 +53,6 @@ var (
 )
 
 func main() {
-
 	log.Level = log.LevelDebug
 
 	log.Infof("Pod reaper smiles at all pods; all a pod can do is smile back.")
@@ -113,77 +115,19 @@ func main() {
 		}
 	}()
 
+	reaperNamespaces := namespaces()
+
 	for {
-		reaperNamespaces := namespaces()
-		if len(reaperNamespaces) == 0 {
-			panic("No namespace specified. Exiting.")
-		}
-		for _, ns := range reaperNamespaces {
-			pods, err := clientset.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{})
-			if err != nil {
-				panic(err.Error())
-			}
 
-			log.Infof("Checking %d pods in namespace %s\n", len(pods.Items), ns)
-			podsTracking := 0
-			podsKilled := 0
+		reapPods(clientset, reaperNamespaces, maxReaperCount, evict, reapEvicted)
 
-			for _, v := range pods.Items {
-				if val, ok := v.Annotations[lifetimeAnnotation]; ok {
-					log.Debugf("pod %s : Found annotation %s with value %s\n", v.Name, lifetimeAnnotation, val)
-					podsTracking++
-					lifetime, _ := time.ParseDuration(val)
-					if lifetime == 0 {
-						log.Debugf("pod %s : provided value %s is incorrect\n", v.Name, val)
-					} else if podsKilled < maxReaperCount {
-						log.Debugf("pod %s : %s\n", v.Name, v.CreationTimestamp)
-						currentLifetime := time.Since(v.CreationTimestamp.Time)
-						if currentLifetime > lifetime {
-							var err error
-							if evict {
-								log.Infof("pod %s : pod is past its lifetime and will be evicted\n", v.Name)
-								err = clientset.CoreV1().Pods(v.Namespace).Evict(context.TODO(), &policyv1.Eviction{
-									ObjectMeta:    metav1.ObjectMeta{Namespace: v.Namespace, Name: v.Name},
-									DeleteOptions: &metav1.DeleteOptions{},
-								})
-							} else {
-								log.Infof("pod %s : pod is past its lifetime and will be killed.\n", v.Name)
-								err = clientset.CoreV1().Pods(v.Namespace).Delete(context.TODO(), v.Name, metav1.DeleteOptions{})
-							}
-							if err != nil {
-								log.Infof("unable to reap pod %s : %s", v.Name, err.Error())
-							} else {
-								log.Infof("pod %s : pod reaped.\n", v.Name)
-								podsKilled++
-							}
-						}
-					} else {
-						log.Debugf("pod %s : max %d pods killed\n", v.Name, maxReaperCount)
-					}
-				}
+		reapNodes(clientset)
 
-				if reapEvicted && strings.Contains(v.Status.Reason, "Evicted") {
-					log.Debugf("pod %s : pod is evicted and needs to be deleted", v.Name)
-					err := clientset.CoreV1().Pods(v.Namespace).Delete(context.TODO(), v.Name, metav1.DeleteOptions{})
-					if err != nil {
-						panic(err.Error())
-					}
-					log.Infof("pod %s : pod killed.\n", v.Name)
-					podsKilled++
-				}
-			}
-
-			log.Infof("Killed %d Old/Evicted Pods.", podsKilled)
-			metricPods.WithLabelValues(ns, "ignoring").Set(float64(len(pods.Items) - podsTracking))
-			metricPods.WithLabelValues(ns, "tracking").Set(float64(podsTracking))
-			metricPodsReaped.WithLabelValues(ns, "killed").Add(float64(podsKilled))
-		}
-		if !runAsCronJob {
-			log.Infof("Now sleeping for %d seconds", int(sleepDuration().Seconds()))
-			time.Sleep(sleepDuration())
-		} else {
+		if runAsCronJob {
 			break
 		}
+		log.Infof("Now sleeping for %d seconds", int(sleepDuration().Seconds()))
+		time.Sleep(sleepDuration())
 	}
 }
 
@@ -196,7 +140,12 @@ func remoteExec() bool {
 			panic("REMOTE_EXEC var incorrectly set")
 		}
 	}
-	panic("REMOTE_EXEC var not set")
+	return false
+}
+
+func getNodeLifeTime() string {
+	i := os.Getenv("NODE_LIFE_TIME")
+	return i
 }
 
 func maxReaperCountPerRun() int {
@@ -261,4 +210,111 @@ func evict() bool {
 		}
 	}
 	return false
+}
+
+func reapPods(clientset *kubernetes.Clientset, reaperNamespaces []string, maxReaperCount int, evict bool, reapEvicted bool) {
+	if len(reaperNamespaces) == 0 {
+		fmt.Println("No namespaces to monitor")
+		return
+	}
+	for _, ns := range reaperNamespaces {
+		pods, err := clientset.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			panic(err.Error())
+		}
+
+		log.Infof("Checking %d pods in namespace %s\n", len(pods.Items), ns)
+		podsTracking := 0
+		podsKilled := 0
+
+		for _, v := range pods.Items {
+			if val, ok := v.Annotations[lifetimeAnnotation]; ok {
+				log.Debugf("pod %s : Found annotation %s with value %s\n", v.Name, lifetimeAnnotation, val)
+				podsTracking++
+				lifetime, _ := time.ParseDuration(val)
+				if lifetime == 0 {
+					log.Debugf("pod %s : provided value %s is incorrect\n", v.Name, val)
+				} else if podsKilled < maxReaperCount {
+					log.Debugf("pod %s : %s\n", v.Name, v.CreationTimestamp)
+					currentLifetime := time.Since(v.CreationTimestamp.Time)
+					if currentLifetime > lifetime {
+						var err error
+						if evict {
+							log.Infof("pod %s : pod is past its lifetime and will be evicted\n", v.Name)
+							err = clientset.CoreV1().Pods(v.Namespace).Evict(context.TODO(), &policyv1.Eviction{
+								ObjectMeta:    metav1.ObjectMeta{Namespace: v.Namespace, Name: v.Name},
+								DeleteOptions: &metav1.DeleteOptions{},
+							})
+						} else {
+							log.Infof("pod %s : pod is past its lifetime and will be killed.\n", v.Name)
+							err = clientset.CoreV1().Pods(v.Namespace).Delete(context.TODO(), v.Name, metav1.DeleteOptions{})
+						}
+						if err != nil {
+							log.Infof("unable to reap pod %s : %s", v.Name, err.Error())
+						} else {
+							log.Infof("pod %s : pod reaped.\n", v.Name)
+							podsKilled++
+						}
+					}
+				} else {
+					log.Debugf("pod %s : max %d pods killed\n", v.Name, maxReaperCount)
+				}
+			}
+
+			if reapEvicted && strings.Contains(v.Status.Reason, "Evicted") {
+				log.Debugf("pod %s : pod is evicted and needs to be deleted", v.Name)
+				err := clientset.CoreV1().Pods(v.Namespace).Delete(context.TODO(), v.Name, metav1.DeleteOptions{})
+				if err != nil {
+					panic(err.Error())
+				}
+				log.Infof("pod %s : pod killed.\n", v.Name)
+				podsKilled++
+			}
+		}
+
+		log.Infof("Killed %d Old/Evicted Pods.", podsKilled)
+		metricPods.WithLabelValues(ns, "ignoring").Set(float64(len(pods.Items) - podsTracking))
+		metricPods.WithLabelValues(ns, "tracking").Set(float64(podsTracking))
+		metricPodsReaped.WithLabelValues(ns, "killed").Add(float64(podsKilled))
+	}
+}
+
+func reapNodes(clientset *kubernetes.Clientset) {
+	nodeLifeTime := getNodeLifeTime()
+	if len(nodeLifeTime) == 0 {
+		return
+	}
+	lifetime, err := time.ParseDuration(getNodeLifeTime())
+	if err != nil {
+		fmt.Printf("\nFailed to process NODE_LIFE_TIME = %v", nodeLifeTime)
+		return
+	}
+
+	var taint = &v1.Taint{
+		Key:    "ci_node",
+		Effect: v1.TaintEffectNoSchedule,
+		Value:  "Disable",
+	}
+
+	nodes, _ := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	for _, v := range nodes.Items {
+		spot := false
+		currentLifetime := time.Since(v.CreationTimestamp.Time)
+		if currentLifetime < lifetime {
+			continue
+		}
+		for a, b := range v.Labels {
+			if a == "node-lifecycle" && b == "spot" {
+				spot = true
+			}
+		}
+		if !spot {
+			continue
+		}
+		err := cloudnodeutil.AddOrUpdateTaintOnNode(clientset, v.Name, taint)
+		if err != nil {
+			fmt.Printf("\nfailed to apply shutdown taint to node %v, it may have been deleted.", v.Name)
+		}
+		fmt.Printf("\nDisable node %v", v.Name)
+	}
 }
