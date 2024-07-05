@@ -282,6 +282,7 @@ func reapPods(clientset *kubernetes.Clientset, reaperNamespaces []string, maxRea
 func reapNodes(clientset *kubernetes.Clientset) {
 	nodeLifeTime := getNodeLifeTime()
 	if len(nodeLifeTime) == 0 {
+		log.Debugf("\nNode reaper is disabled.")
 		return
 	}
 	lifetime, err := time.ParseDuration(getNodeLifeTime())
