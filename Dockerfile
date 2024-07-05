@@ -1,5 +1,5 @@
 # build stage
-FROM golang:1.21-bullseye AS build
+FROM golang:1.22-bookworm AS build
 
 WORKDIR /opt/build
 
@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 go build -a -tags "netgo" -ldflags '-s -w' -o app
 
 # artifact stage
 # hadolint ignore=DL3007
-FROM gcr.io/distroless/static-debian11:latest
+FROM gcr.io/distroless/base-debian12:latest
 WORKDIR /opt/app
 
 COPY --from=build /opt/build/app /usr/local/bin/pod-reaper
