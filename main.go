@@ -22,7 +22,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	cloudnodeutil "k8s.io/cloud-provider/node/helpers"
+	cloud "k8s.io/cloud-provider/node/helpers"
 )
 
 const (
@@ -50,7 +50,23 @@ var (
 			"kind",
 		},
 	)
+	metricNodes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "node_reaper_detected",
+			Help: "Number of nodes watching.",
+		},
+		[]string{
+			"nodegroups",
+			"nodes",
+		},
+	)
 )
+
+type NodeGroup struct {
+	Spot    int
+	Tainted int
+	Total   int
+}
 
 func main() {
 	log.Level = log.LevelDebug
@@ -214,7 +230,7 @@ func evict() bool {
 
 func reapPods(clientset *kubernetes.Clientset, reaperNamespaces []string, maxReaperCount int, evict bool, reapEvicted bool) {
 	if len(reaperNamespaces) == 0 {
-		fmt.Println("No namespaces to monitor")
+		log.Infof("No namespaces to monitor")
 		return
 	}
 	for _, ns := range reaperNamespaces {
@@ -282,12 +298,12 @@ func reapPods(clientset *kubernetes.Clientset, reaperNamespaces []string, maxRea
 func reapNodes(clientset *kubernetes.Clientset) {
 	nodeLifeTime := getNodeLifeTime()
 	if len(nodeLifeTime) == 0 {
-		log.Debugf("\nNode reaper is disabled.")
+		log.Infof("\nNode reaper is disabled.")
 		return
 	}
 	lifetime, err := time.ParseDuration(getNodeLifeTime())
 	if err != nil {
-		fmt.Printf("\nFailed to process NODE_LIFE_TIME = %v", nodeLifeTime)
+		log.Errorf("\nFailed to process NODE_LIFE_TIME = %v", nodeLifeTime)
 		return
 	}
 
@@ -298,24 +314,55 @@ func reapNodes(clientset *kubernetes.Clientset) {
 	}
 
 	nodes, _ := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
-	for _, v := range nodes.Items {
+	// count nodes in nodeGroup
+	nGroups := make(map[string]NodeGroup)
+	for _, node := range nodes.Items {
+		var nodeGroup string
+		var ng NodeGroup
+		for k, v := range node.Labels {
+			if k == "node-lifecycle" && v == "spot" {
+				ng.Spot = 1
+			}
+			if k == "ci_node" && v == "Disable:NoSchedule" {
+				ng.Tainted = 1
+			}
+			if k == "alpha.eksctl.io/nodegroup-name" {
+				nodeGroup = v
+			}
+		}
+		_, ok := nGroups[nodeGroup]
+		if ok {
+			ng.Spot += nGroups[nodeGroup].Spot
+			ng.Tainted += nGroups[nodeGroup].Tainted
+			ng.Total += nGroups[nodeGroup].Total
+		}
+		nGroups[nodeGroup] = ng
+	}
+	// expose metrics
+	for ngName, ngValue := range nGroups {
+		metricNodes.WithLabelValues(ngName, "spot").Set(float64(ngValue.Spot))
+		metricNodes.WithLabelValues(ngName, "tainted").Set(float64(ngValue.Tainted))
+		metricNodes.WithLabelValues(ngName, "total").Set(float64(ngValue.Total))
+	}
+	// apply taint
+	for _, node := range nodes.Items {
 		spot := false
-		currentLifetime := time.Since(v.CreationTimestamp.Time)
+		currentLifetime := time.Since(node.CreationTimestamp.Time)
 		if currentLifetime < lifetime {
 			continue
 		}
-		for a, b := range v.Labels {
-			if a == "node-lifecycle" && b == "spot" {
+		for k, v := range node.Labels {
+			if k == "node-lifecycle" && v == "spot" {
 				spot = true
 			}
 		}
 		if !spot {
 			continue
 		}
-		err := cloudnodeutil.AddOrUpdateTaintOnNode(clientset, v.Name, taint)
+		err := cloud.AddOrUpdateTaintOnNode(clientset, node.Name, taint)
 		if err != nil {
-			fmt.Printf("\nfailed to apply shutdown taint to node %v, it may have been deleted.", v.Name)
+			log.Errorf("\nfailed to apply shutdown taint to node %v, it may have been deleted.", node.Name)
 		}
-		fmt.Printf("\nDisable node %v", v.Name)
+		log.Debugf("\nDisable node %v", node.Name)
 	}
 }
