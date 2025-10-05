@@ -9,13 +9,13 @@ kind: Role
 metadata:
   name: "{{ .Release.Name }}"
 rules:
-- apiGroups:
-    - ""
-  resources:
-    - pods
-  verbs:
-    - delete
-    - list
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - delete
+      - list
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -26,5 +26,5 @@ roleRef:
   kind: Role
   name: "{{ .Release.Name }}"
 subjects:
-- kind: ServiceAccount
-  name: "{{ .Release.Name }}"
+  - kind: ServiceAccount
+    name: "{{ .Release.Name }}"
