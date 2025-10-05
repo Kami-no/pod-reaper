@@ -121,7 +121,7 @@ func main() {
 
 	// metrics server
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "ok\n")
+		_, _ = fmt.Fprint(w, "ok\n")
 	})
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
